@@ -136,6 +136,8 @@ static int nand_erase(int block_index)
     }
     fclose(fptr);
     valid_count[block_index] = FREE_BLOCK;
+    // TODO
+    free_block_number++;
     return 1;
 }
 
@@ -190,14 +192,45 @@ static unsigned int get_next_pca()
 }
 
 
-static int ftl_read( char* buf, size_t lba)
+static int ftl_read(char* buf, size_t lba)
 {
     // TODO
+    PCA_RULE pca;
+    pca.pca = L2P[lba];
+    printf("ftl_read: lba = %lu, L2P[lba].fields.nand = %hu, L2P[lba].fields.lba = %hu\n", lba, ((PCA_RULE)L2P[lba]).fields.nand, ((PCA_RULE)L2P[lba]).fields.lba);
+    if(pca.pca == INVALID_LBA) return 0;
+    return nand_read(buf, pca.pca);
 }
 
-static int ftl_write(const char* buf, size_t lba_rnage, size_t lba)
+static int ftl_write(const char* buf, size_t lba_range, size_t lba)
 {
     // TODO
+    PCA_RULE pca;
+    PCA_RULE old_pca;
+    size_t ret = 0;
+    printf("################################################\n");
+    printf("ftl_write: lba = %lu, lba_range = %lu\n", lba, lba_range);
+    for (int i = 0 ; i < lba_range ; i++, lba++) {
+        if(( pca.pca = get_next_pca()) == OUT_OF_BLOCK){
+            // GC
+        }else{
+            printf("pca.fields.nand = %hu, pca.fields.lba = %hu\n", pca.fields.nand, pca.fields.lba);
+
+            if(L2P[lba] != INVALID_LBA){
+            // update corresponding old pca's status
+                old_pca = (PCA_RULE)L2P[lba];
+                P2L[old_pca.fields.lba + old_pca.fields.nand * PAGE_PER_BLOCK] = INVALID_PCA; 
+                valid_count[old_pca.fields.nand]--;
+            }
+            
+        }
+        // update corresponding new pca's status and lba's status
+        L2P[lba] = pca.pca;
+        P2L[pca.fields.lba + pca.fields.nand * PAGE_PER_BLOCK] = lba; 
+        ret += nand_write(buf + i * 512, pca.pca);
+    }
+    printf("################################################\n");
+    return ret;
 }
 
 
@@ -248,7 +281,7 @@ static int ssd_open(const char* path, struct fuse_file_info* fi)
 }
 static int ssd_do_read(char* buf, size_t size, off_t offset)
 {
-    int tmp_lba, tmp_lba_range, rst ;
+    int tmp_lba, tmp_lba_range;
     char* tmp_buf;
 
     //off limit
@@ -268,6 +301,7 @@ static int ssd_do_read(char* buf, size_t size, off_t offset)
 
     for (int i = 0; i < tmp_lba_range; i++) {
         // TODO
+        ftl_read(tmp_buf + i * 512, tmp_lba + i);
     }
 
     memcpy(buf, tmp_buf + offset % 512, size);
@@ -288,10 +322,10 @@ static int ssd_read(const char* path, char* buf, size_t size,
 }
 static int ssd_do_write(const char* buf, size_t size, off_t offset)
 {
-    int tmp_lba, tmp_lba_range, process_size;
-    int idx, curr_size, remain_size, rst;
+    int tmp_lba, tmp_lba_range;
     char* tmp_buf;
-
+    
+    printf("ssd_do_write: size = %lu, offset = %lu\n",size ,offset);
     host_write_size += size;
     if (ssd_expand(offset + size) != 0)
     {
@@ -301,13 +335,22 @@ static int ssd_do_write(const char* buf, size_t size, off_t offset)
     tmp_lba = offset / 512;
     tmp_lba_range = (offset + size - 1) / 512 - (tmp_lba) + 1;
 
-    process_size = 0;
-    remain_size = size;
-    curr_size = 0;
-    for (idx = 0; idx < tmp_lba_range; idx++)
-    {
-        // TODO
+    // TODO
+    tmp_buf = (char*)malloc(512);
+     
+    for (int i = 0; i < tmp_lba_range; i++) {
+        if(i == 0 && offset % 512){
+            ftl_read(tmp_buf, tmp_lba + i); 
+            memcpy(tmp_buf, &buf[offset], (size + offset > 512) ? 512 - offset : size);
+        }else if( i == tmp_lba_range - 1 && (offset + size) % 512){
+            ftl_read(tmp_buf, tmp_lba + i); 
+            memcpy(tmp_buf, &buf[i * 512], 512 - (offset + size));
+        }else{
+            memcpy(tmp_buf, &buf[i * 512], 512);
+        }
+        ftl_write(tmp_buf, 1, tmp_lba + i);
     }
+    free(tmp_buf);
     return size;
 }
 static int ssd_write(const char* path, const char* buf, size_t size,
