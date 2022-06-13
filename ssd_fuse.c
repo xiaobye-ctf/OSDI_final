@@ -136,8 +136,6 @@ static int nand_erase(int block_index)
     }
     fclose(fptr);
     valid_count[block_index] = FREE_BLOCK;
-    // TODO
-    free_block_number++;
     return 1;
 }
 
@@ -188,7 +186,6 @@ static unsigned int get_next_pca()
         curr_pca.fields.lba += 1;
     }
     return curr_pca.pca;
-
 }
 
 
@@ -202,6 +199,57 @@ static int ftl_read(char* buf, size_t lba)
     return nand_read(buf, pca.pca);
 }
 
+static void _my_GC(){
+    int target_block, target_phy_page, target_logic_page;
+    unsigned int min_valid_page_num = PAGE_PER_BLOCK + 1;
+    char *tmp_buf = malloc(512);
+    PCA_RULE pca, old_pca;
+    // pick a block that contain less valid page 
+    for(int i = 0 ; i < PHYSICAL_NAND_NUM ; i++){
+        if(curr_pca.fields.nand != i && min_valid_page_num >= valid_count[i]){
+            min_valid_page_num = valid_count[i];
+            target_block = i;
+        }
+    }
+
+    printf("*****************************************\n");
+    printf("Garbage collector pick block %d with %d valid page as target\n", target_block, min_valid_page_num);
+    printf("*****************************************\n");
+
+
+    // copy valid page to free page
+    for(int i = 0 ; i < PAGE_PER_BLOCK ; i++){ 
+        target_phy_page = i + target_block * PAGE_PER_BLOCK; 
+
+        if(P2L[target_phy_page] != INVALID_PCA){
+            target_logic_page = P2L[target_phy_page];
+            P2L[target_phy_page] = INVALID_PCA;
+        }else{
+            continue;
+        }
+
+        if((pca.pca = get_next_pca()) == OUT_OF_BLOCK){
+            free(tmp_buf);
+            return;
+        } 
+        // update lba's status and copy valid page to free page
+        old_pca.pca = L2P[target_logic_page];
+        L2P[target_logic_page] = pca.pca;
+        P2L[pca.fields.lba + pca.fields.nand * PAGE_PER_BLOCK] = target_logic_page;
+
+        printf("old_pca.fields.nand = %hu, old_pca.fields.lba = %hu\n", old_pca.fields.nand, old_pca.fields.lba);
+        printf("pca.fields.nand = %hu, pca.fields.lba = %hu\n", pca.fields.nand, pca.fields.lba);
+        nand_read(tmp_buf, old_pca.pca);
+        nand_write(tmp_buf, pca.pca);
+    }
+
+    // erase target block
+    nand_erase(target_block);
+    free_block_number++;
+
+    free(tmp_buf);
+}
+
 static int ftl_write(const char* buf, size_t lba_range, size_t lba)
 {
     // TODO
@@ -211,19 +259,24 @@ static int ftl_write(const char* buf, size_t lba_range, size_t lba)
     printf("################################################\n");
     printf("ftl_write: lba = %lu, lba_range = %lu\n", lba, lba_range);
     for (int i = 0 ; i < lba_range ; i++, lba++) {
-        if(( pca.pca = get_next_pca()) == OUT_OF_BLOCK){
+        if( free_block_number <= 1){
             // GC
-        }else{
-            printf("pca.fields.nand = %hu, pca.fields.lba = %hu\n", pca.fields.nand, pca.fields.lba);
-
-            if(L2P[lba] != INVALID_LBA){
-            // update corresponding old pca's status
-                old_pca = (PCA_RULE)L2P[lba];
-                P2L[old_pca.fields.lba + old_pca.fields.nand * PAGE_PER_BLOCK] = INVALID_PCA; 
-                valid_count[old_pca.fields.nand]--;
-            }
-            
+            _my_GC();
+            // if free_block_number is still PHYSICAL_NAND_NUM after executing GC
+            // then it means that ssd has no room for the data
+            if( free_block_number <= 0) return ENOSPC;
         }
+
+        pca.pca = get_next_pca();
+        printf("pca.fields.nand = %hu, pca.fields.lba = %hu\n", pca.fields.nand, pca.fields.lba);
+
+        if(L2P[lba] != INVALID_LBA){
+        // update corresponding old pca's status
+            old_pca = (PCA_RULE)L2P[lba];
+            P2L[old_pca.fields.lba + old_pca.fields.nand * PAGE_PER_BLOCK] = INVALID_PCA; 
+            valid_count[old_pca.fields.nand]--;
+        }
+            
         // update corresponding new pca's status and lba's status
         L2P[lba] = pca.pca;
         P2L[pca.fields.lba + pca.fields.nand * PAGE_PER_BLOCK] = lba; 
@@ -344,11 +397,11 @@ static int ssd_do_write(const char* buf, size_t size, off_t offset)
             memcpy(tmp_buf, &buf[offset], (size + offset > 512) ? 512 - offset : size);
         }else if( i == tmp_lba_range - 1 && (offset + size) % 512){
             ftl_read(tmp_buf, tmp_lba + i); 
-            memcpy(tmp_buf, &buf[i * 512], 512 - (offset + size));
+            memcpy(tmp_buf, &buf[i * 512], 512 - ((offset + size) % 512));
         }else{
             memcpy(tmp_buf, &buf[i * 512], 512);
         }
-        ftl_write(tmp_buf, 1, tmp_lba + i);
+        if(ftl_write(tmp_buf, 1, tmp_lba + i) == ENOSPC) return ENOSPC;
     }
     free(tmp_buf);
     return size;
