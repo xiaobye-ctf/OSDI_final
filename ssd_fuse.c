@@ -354,6 +354,7 @@ static int ssd_do_read(char* buf, size_t size, off_t offset)
 
     for (int i = 0; i < tmp_lba_range; i++) {
         // TODO
+        if(tmp_lba + i > LOGICAL_NAND_NUM * PAGE_PER_BLOCK) break;  
         ftl_read(tmp_buf + i * 512, tmp_lba + i);
     }
 
@@ -401,6 +402,7 @@ static int ssd_do_write(const char* buf, size_t size, off_t offset)
         }else{
             memcpy(tmp_buf, &buf[i * 512], 512);
         }
+        if(tmp_lba + i > LOGICAL_NAND_NUM * PAGE_PER_BLOCK) break;  
         if(ftl_write(tmp_buf, 1, tmp_lba + i) == ENOSPC) return ENOSPC;
     }
     free(tmp_buf);
