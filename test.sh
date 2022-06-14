@@ -38,7 +38,7 @@ case "$1" in
         done
         ;;
     "test4")
-        for i in $(seq 0 1)
+        for i in $(seq 0 4)
         do
             cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 51200 | tee ${SSD_FILE} > ${GOLDEN} 2> /dev/null
         done
