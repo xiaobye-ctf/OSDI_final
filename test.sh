@@ -29,6 +29,47 @@ case "$1" in
         dd if=${TEMP} skip=10240 of=${GOLDEN} oflag=seek_bytes seek=0 bs=1024 count=1 conv=notrunc 2> /dev/null
         dd if=${TEMP} skip=10240 of=${SSD_FILE} oflag=seek_bytes seek=0 bs=1024 count=1 conv=notrunc 2> /dev/null
         ;;
+    "test3")
+        cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 51200 | tee ${SSD_FILE} > ${GOLDEN} 2> /dev/null
+        for i in $(seq 0 30)
+        do
+            ./ssd_fuse_dut ${SSD_FILE} w 100 0
+            ./ssd_fuse_dut ${GOLDEN} w 100 0
+        done
+        ;;
+    "test4")
+        for i in $(seq 0 1)
+        do
+            cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 51200 | tee ${SSD_FILE} > ${GOLDEN} 2> /dev/null
+        done
+        ;;
+    "test5")
+        cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 51200 | tee ${SSD_FILE} > ${GOLDEN} 2> /dev/null
+        cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 11264 > ${TEMP}
+        for i in $(seq 0 9)
+        do
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*1024)) of=${GOLDEN} oflag=seek_bytes seek=$(($i*5120)) bs=1024 count=1 conv=notrunc 2> /dev/null
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*1024)) of=${SSD_FILE} oflag=seek_bytes seek=$(($i*5120)) bs=1024 count=1 conv=notrunc 2> /dev/null
+        done
+        for i in $(seq 2 7)
+        do
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*1024)) of=${GOLDEN} oflag=seek_bytes seek=$(($i*5120)) bs=1024 count=1 conv=notrunc 2> /dev/null
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*1024)) of=${SSD_FILE} oflag=seek_bytes seek=$(($i*5120)) bs=1024 count=1 conv=notrunc 2> /dev/null
+        done
+        ;;
+    "test6")
+        cat /dev/urandom | tr -dc '[:alpha:][:digit:]' | head -c 66560 > ${TEMP}
+        for i in $(seq 0 99)
+        do
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*512)) of=${GOLDEN} oflag=seek_bytes seek=$(((($i*11)%100)*512)) bs=512 count=1 conv=notrunc 2> /dev/null
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*512)) of=${SSD_FILE} oflag=seek_bytes seek=$(((($i*11)%100)*512)) bs=512 count=1 conv=notrunc 2> /dev/null
+        done
+        for i in $(seq 0 30)
+        do
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*512)) of=${GOLDEN} oflag=seek_bytes seek=$(((($i*3+87)%100)*512)) bs=512 count=1 conv=notrunc 2> /dev/null
+            dd if=${TEMP} iflag=skip_bytes skip=$(($i*512)) of=${SSD_FILE} oflag=seek_bytes seek=$(((($i*3+87)%100)*512)) bs=512 count=1 conv=notrunc 2> /dev/null
+        done
+        ;;    
     *)
         printf "Usage: sh test.sh test_pattern\n"
         printf "\n"
@@ -42,6 +83,7 @@ case "$1" in
         printf "       test GC's result\n"
         return 
         ;;
+
 esac
 
 # check
@@ -55,4 +97,4 @@ fi
 
 echo "WA:"
 ./ssd_fuse_dut /tmp/ssd/ssd_file W
-rm -rf ${TEMP} ${GOLDEN}
+#rm -rf ${TEMP} ${GOLDEN}

@@ -394,8 +394,11 @@ static int ssd_do_write(const char* buf, size_t size, off_t offset)
      
     for (int i = 0; i < tmp_lba_range; i++) {
         if(i == 0 && offset % 512){
-            ftl_read(tmp_buf, tmp_lba + i); 
+            ftl_read(tmp_buf, tmp_lba + i);
             memcpy(tmp_buf, &buf[offset], (size + offset > 512) ? 512 - offset : size);
+        }else if(i == 0 && size < 512){
+            ftl_read(tmp_buf, tmp_lba + i);
+            memcpy(tmp_buf, buf,  size);
         }else if( i == tmp_lba_range - 1 && (offset + size) % 512){
             ftl_read(tmp_buf, tmp_lba + i); 
             memcpy(tmp_buf, &buf[i * 512], 512 - ((offset + size) % 512));
